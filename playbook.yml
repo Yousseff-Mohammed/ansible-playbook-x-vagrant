@@ -1,0 +1,7 @@
+---
+- name: Configure xCAT Management Node
+  hosts: localhost
+  become: yes
+
+  roles:
+    - xcat_mgmt
