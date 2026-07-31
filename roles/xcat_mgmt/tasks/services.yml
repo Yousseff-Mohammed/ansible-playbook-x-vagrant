@@ -1,0 +1,135 @@
+---
+- name: Generate xCAT network definitions from the management interface
+  ansible.builtin.shell: |
+    source {{ xcat_profile_script }}
+    makenetworks
+  args:
+    executable: /bin/bash
+  changed_when: true
+
+- name: Install DHCP
+  ansible.builtin.yum:
+    name: dhcp
+    state: present
+
+- name: Generate dhcpd.conf from xCAT tables
+  ansible.builtin.shell: |
+    source {{ xcat_profile_script }}
+    makedhcp -n
+  args:
+    executable: /bin/bash
+  changed_when: true
+  notify: restart dhcpd
+
+- name: Enable and start dhcpd
+  ansible.builtin.systemd:
+    name: dhcpd
+    state: started
+    enabled: true
+
+- name: Install BIND
+  ansible.builtin.yum:
+    name:
+      - bind
+      - bind-utils
+    state: present
+
+- name: Ensure xCAT DNS is queried first in resolv.conf
+  ansible.builtin.lineinfile:
+    path: /etc/resolv.conf
+    insertbefore: BOF
+    line: "nameserver {{ mgmt_ip }}"
+    state: present
+
+- name: Generate DNS zone data from xCAT tables
+  ansible.builtin.shell: |
+    source {{ xcat_profile_script }}
+    makedns -n
+  args:
+    executable: /bin/bash
+  changed_when: true
+  notify: restart named
+
+- name: Enable and start named
+  ansible.builtin.systemd:
+    name: named
+    state: started
+    enabled: true
+
+- name: Reapply the management interface connection
+  ansible.builtin.command: "ifup {{ mgmt_iface }}"
+  changed_when: true
+
+- name: Install chrony (Modern NTP)
+  ansible.builtin.yum:
+    name: chrony
+    state: present
+
+- name: Configure Chrony local-clock fallback
+  ansible.builtin.lineinfile:
+    path: /etc/chrony.conf
+    line: "local stratum 10"
+    state: present
+  notify: restart chronyd
+
+- name: Enable and start chronyd
+  ansible.builtin.systemd:
+    name: chronyd
+    state: started
+    enabled: true
+
+# --- TFTP: xCAT expects /tftpboot, not the CentOS default /var/lib/tftpboot
+- name: Install TFTP server
+  ansible.builtin.yum:
+    name:
+      - tftp-server
+      - xinetd
+    state: present
+
+- name: Point TFTP at /tftpboot (xCAT's expected serving directory)
+  ansible.builtin.replace:
+    path: /etc/xinetd.d/tftp
+    regexp: '/var/lib/tftpboot'
+    replace: '/tftpboot'
+  notify: restart xinetd
+
+- name: Create /tftpboot
+  ansible.builtin.file:
+    path: /tftpboot
+    state: directory
+    mode: "0755"
+
+- name: Ensure the TFTP service is enabled inside xinetd
+  ansible.builtin.replace:
+    path: /etc/xinetd.d/tftp
+    regexp: 'disable\s*=\s*yes'
+    replace: 'disable                 = no'
+  notify: restart xinetd
+
+- name: Enable and start xinetd (serves TFTP on CentOS 7)
+  ansible.builtin.systemd:
+    name: xinetd
+    state: started
+    enabled: true
+
+# --- HTTP: serves /install and /tftpboot over HTTP
+- name: Install Apache
+  ansible.builtin.yum:
+    name: httpd
+    state: present
+
+- name: Configure Apache aliases for /install and /tftpboot
+  ansible.builtin.template:
+    src: xcat-httpd.conf.j2
+    dest: /etc/httpd/conf.d/xcat.conf
+    mode: "0644"
+  notify: restart httpd
+
+- name: Enable and start httpd
+  ansible.builtin.systemd:
+    name: httpd
+    state: started
+    enabled: true
+
+- name: Flush handlers now so services are confirmed running before verification
+  ansible.builtin.meta: flush_handlers

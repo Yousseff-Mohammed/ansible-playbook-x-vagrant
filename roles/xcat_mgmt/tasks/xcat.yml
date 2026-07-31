@@ -1,0 +1,151 @@
+---
+- name: Install xCAT build prerequisites
+  ansible.builtin.yum:
+    name:
+      - rpm-build
+      - expect
+      - createrepo
+      - perl-Time-HiRes
+      - perl-DBI
+      - perl-Sys-Syslog
+      - perl-generators
+      - perl-JSON
+      - perl-Digest-MD5
+    state: present
+
+- name: Clone the xCAT core repository
+  ansible.builtin.git:
+    repo: "{{ xcat_core_repo }}"
+    dest: "{{ xcat_core_dir }}"
+    version: "{{ xcat_version }}"
+    force: yes
+
+- name: Build xCAT core RPMs from source
+  ansible.builtin.command: ./buildcore.sh
+  args:
+    chdir: "{{ xcat_core_dir }}"
+    creates: "{{ xcat_build_output }}"
+  register: buildcore_result
+  changed_when: "'error' not in buildcore_result.stdout | lower"
+  failed_when: "'build of the following RPMs failed' in buildcore_result.stdout"
+
+- name: Confirm the build actually produced output
+  ansible.builtin.stat:
+    path: "{{ xcat_build_output }}"
+  register: build_tarball
+
+- name: Fail with a clear message if the source build produced nothing
+  ansible.builtin.fail:
+    msg: >
+      buildcore.sh did not produce {{ xcat_build_output }}. Re-check for
+      missing Perl build dependencies -- perl-Sys-Syslog and perl-generators
+      were the two culprits found during manual testing.
+  when: not build_tarball.stat.exists
+
+- name: Download the xcat-dep bundle (prebuilt -- not source-buildable)
+  ansible.builtin.get_url:
+    url: "{{ xcat_dep_url }}"
+    dest: "{{ xcat_dep_archive }}"
+
+- name: Create working directory for the extracted core build
+  ansible.builtin.file:
+    path: "{{ xcat_core_extract_dir }}"
+    state: directory
+    mode: "0755"
+
+- name: Extract the source-built core RPMs archive
+  ansible.builtin.unarchive:
+    src: "{{ xcat_build_output }}"
+    dest: "{{ xcat_core_extract_dir }}"
+    remote_src: yes
+    creates: "{{ xcat_core_extract_dir }}"
+
+- name: Locate mklocalrepo.sh inside the extracted core build
+  ansible.builtin.find:
+    paths: "{{ xcat_core_extract_dir }}"
+    patterns: "mklocalrepo.sh"
+    recurse: yes
+  register: core_mklocalrepo
+
+- name: Fail if mklocalrepo.sh isn't found in the core build output
+  ansible.builtin.fail:
+    msg: "mklocalrepo.sh not found under {{ xcat_core_extract_dir }} -- check the buildcore.sh output archive contents."
+  when: core_mklocalrepo.matched == 0
+
+- name: Run mklocalrepo.sh for xCAT core
+  ansible.builtin.command: ./mklocalrepo.sh
+  args:
+    chdir: "{{ core_mklocalrepo.files[0].path | dirname }}"
+  changed_when: true
+
+- name: Create working directory for xcat-dep
+  ansible.builtin.file:
+    path: "{{ xcat_dep_extract_dir }}"
+    state: directory
+    mode: "0755"
+
+- name: Extract the xcat-dep archive
+  ansible.builtin.unarchive:
+    src: "{{ xcat_dep_archive }}"
+    dest: "{{ xcat_dep_extract_dir }}"
+    remote_src: yes
+    creates: "{{ xcat_dep_extract_dir }}"
+
+- name: Locate mklocalrepo.sh for the specific OS and Architecture
+  ansible.builtin.find:
+    paths: "{{ xcat_dep_extract_dir }}/xcat-dep/rh{{ ansible_distribution_major_version }}/{{ ansible_architecture }}"
+    patterns: "mklocalrepo.sh"
+    recurse: yes
+    file_type: link
+  register: dep_mklocalrepo
+
+- name: Fail if mklocalrepo.sh isn't found for this OS
+  ansible.builtin.fail:
+    msg: "mklocalrepo.sh not found for rh{{ ansible_distribution_major_version }}/{{ ansible_architecture }}"
+  when: dep_mklocalrepo.matched == 0
+
+- name: Run mklocalrepo.sh for xcat-dep
+  ansible.builtin.command: ./mklocalrepo.sh
+  args:
+    chdir: "{{ dep_mklocalrepo.files[0].path | dirname }}"
+  changed_when: true
+
+- name: Clean yum cache before installing (repos were just registered)
+  ansible.builtin.command: yum clean all
+  changed_when: false
+
+- name: Install xCAT from the two local repos registered above
+  ansible.builtin.yum:
+    name: xCAT
+    state: present
+    disable_gpg_check: yes
+
+- name: Confirm xCAT's environment script was installed
+  ansible.builtin.stat:
+    path: "{{ xcat_profile_script }}"
+  register: xcat_env_script
+
+- name: Fail clearly if the xCAT environment script is missing
+  ansible.builtin.fail:
+    msg: >
+      {{ xcat_profile_script }} not found after installing xCAT -- xcatd
+      commands (chdef, mkdef, etc.) won't be on PATH for later tasks.
+  when: not xcat_env_script.stat.exists
+
+- name: Configure basic xCAT site settings
+  ansible.builtin.shell: |
+    source {{ xcat_profile_script }}
+    chdef -t site master={{ mgmt_ip }} domain={{ domain }} timezone="{{ timezone }}"
+  args:
+    executable: /bin/bash
+  changed_when: true
+
+- name: Set default system credentials in xCAT passwd table
+  ansible.builtin.command: /opt/xcat/sbin/chtab key=system passwd.username=root passwd.password=cluster
+  changed_when: true
+
+- name: Enable and start xcatd
+  ansible.builtin.systemd:
+    name: xcatd
+    state: started
+    enabled: yes  

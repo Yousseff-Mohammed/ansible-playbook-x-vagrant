@@ -1,0 +1,66 @@
+---
+- name: Check xcatd service status
+  ansible.builtin.command: systemctl is-active xcatd
+  register: xcatd_status
+  changed_when: false
+  failed_when: xcatd_status.stdout != "active"
+
+- name: Get xCAT version
+  ansible.builtin.shell: |
+    source {{ xcat_profile_script }}
+    lsxcatd -v
+  args:
+    executable: /bin/bash
+  register: xcat_version_check
+  changed_when: false
+
+- name: Confirm xcatd can process a command (site table dump)
+  ansible.builtin.shell: |
+    source {{ xcat_profile_script }}
+    tabdump site
+  args:
+    executable: /bin/bash
+  register: site_dump
+  changed_when: false
+
+- name: Run the full xCAT management-node health probe
+  ansible.builtin.shell: |
+    source {{ xcat_profile_script }}
+    xcatprobe xcatmn -i {{ mgmt_iface }}
+  args:
+    executable: /bin/bash
+  register: xcatprobe_result
+  changed_when: false
+  failed_when: false
+
+- name: Save full verification output to a log file
+  ansible.builtin.copy:
+    dest: /root/xcat-verification.log
+    content: |
+      == systemctl is-active xcatd ==
+      {{ xcatd_status.stdout }}
+
+      == lsxcatd -v ==
+      {{ xcat_version_check.stdout }}
+
+      == tabdump site ==
+      {{ site_dump.stdout }}
+
+      == xcatprobe xcatmn -i {{ mgmt_iface }} ==
+      {{ xcatprobe_result.stdout }}
+    mode: "0644"
+
+- name: Display xcatprobe result
+  ansible.builtin.debug:
+    var: xcatprobe_result.stdout_lines
+
+- name: Warn if xcatprobe reported any FAIL
+  ansible.builtin.debug:
+    msg: >
+      WARNING: xcatprobe reported at least one FAIL -- see
+      /root/xcat-verification.log for details.
+  when: "'FAIL' in xcatprobe_result.stdout"
+
+- name: Display final verification summary
+  ansible.builtin.debug:
+    msg: "xCAT management node is installed and running. Full log at /root/xcat-verification.log"

@@ -1,0 +1,12 @@
+---
+- name: Baseline OS prep essentials
+  ansible.builtin.include_tasks: prep.yml
+
+- name: Build and install xCAT from source
+  ansible.builtin.include_tasks: xcat.yml
+
+- name: Configure supporting services for xCAT
+  ansible.builtin.include_tasks: services.yml
+
+- name: Verify xCAT is installed and running
+  ansible.builtin.include_tasks: verify.yml

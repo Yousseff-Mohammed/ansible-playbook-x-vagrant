@@ -1,0 +1,30 @@
+---
+- name: restart network
+  ansible.builtin.systemd:
+    name: network
+    state: restarted
+
+- name: restart dhcpd
+  ansible.builtin.systemd:
+    name: dhcpd
+    state: restarted
+
+- name: restart named
+  ansible.builtin.systemd:
+    name: named
+    state: restarted
+
+- name: restart chronyd
+  ansible.builtin.systemd:
+    name: chronyd
+    state: restarted
+
+- name: restart xinetd
+  ansible.builtin.systemd:
+    name: xinetd
+    state: restarted
+  
+- name: restart httpd
+  ansible.builtin.systemd:
+    name: httpd
+    state: restarted

@@ -1,0 +1,24 @@
+---
+mgmt_hostname: xcat-master
+mgmt_fqdn: xcat-master.xcat.lan
+mgmt_ip: 192.168.200.10
+mgmt_netmask: 255.255.255.0
+domain: xcat.lan
+timezone: "Africa/Cairo"
+dns_forwarder: 8.8.8.8
+
+mgmt_iface: eth1
+
+xcat_version: "2.17.0"
+xcat_core_repo: "https://github.com/xcat2/xcat-core.git"
+xcat_core_dir: /root/xcat-core
+
+xcat_build_output: /root/xcatbuild/2.14/core-rpms-snap.tar.bz2
+
+xcat_dep_url: "https://xcat.org/files/xcat/xcat-dep/2.x_Linux/xcat-dep-2.17.0-linux.tar.bz2"
+xcat_dep_archive: /root/xcat-dep-2.17.0-linux.tar.bz2
+
+xcat_core_extract_dir: /root/xcatbuild-extract
+xcat_dep_extract_dir: /root/xcat-dep-extract
+
+xcat_profile_script: /etc/profile.d/xcat.sh

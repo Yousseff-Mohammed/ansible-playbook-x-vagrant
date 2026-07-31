@@ -1,0 +1,52 @@
+---
+- name: Set the system hostname
+  ansible.builtin.hostname:
+    name: "{{ mgmt_fqdn }}"
+
+- name: Ensure management node is in /etc/hosts
+  ansible.builtin.lineinfile:
+    path: /etc/hosts
+    line: "{{ mgmt_ip }} {{ mgmt_hostname }} {{ mgmt_fqdn }}"
+    state: present
+
+- name: Configure static IP on the provisioning interface
+  ansible.builtin.template:
+    src: ifcfg-static.j2
+    dest: "/etc/sysconfig/network-scripts/ifcfg-{{ mgmt_iface }}"
+    mode: "0644"
+  notify: restart network
+
+# Essential packages
+- name: Install essential packages
+  ansible.builtin.yum:
+    name:
+      - vim
+      - wget
+      - git
+      - tar
+      - net-tools
+    state: present
+
+# Passwordless SSH
+- name: Generate SSH key pair for root
+  ansible.builtin.user:
+    name: root
+    generate_ssh_key: yes
+    ssh_key_bits: 2048
+    ssh_key_file: .ssh/id_rsa
+
+- name: Read root's public key
+  ansible.builtin.slurp:
+    src: /root/.ssh/id_rsa.pub
+  register: root_ssh_key
+
+- name: Authoraize root's own key for passwordless login to itself
+  ansible.builtin.authorized_key:
+    user: root
+    key: "{{ root_ssh_key.content | b64decode }}"
+    state: present
+
+- name: Set SELinux to permissive
+  ansible.builtin.selinux:
+    policy: targeted
+    state: permissive
