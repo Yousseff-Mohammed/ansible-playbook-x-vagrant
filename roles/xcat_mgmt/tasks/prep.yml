@@ -9,6 +9,12 @@
     line: "{{ mgmt_ip }} {{ mgmt_hostname }} {{ mgmt_fqdn }}"
     state: present
 
+- name: Remove Vagrant's interfering 127.0.1.1 loopback entry
+  ansible.builtin.lineinfile:
+    path: /etc/hosts
+    regexp: '^127\.0\.1\.1'
+    state: absent
+
 - name: Configure static IP on the provisioning interface
   ansible.builtin.template:
     src: ifcfg-static.j2
